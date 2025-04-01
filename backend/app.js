@@ -145,12 +145,14 @@ app.patch("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, 
             if (req.request.volunteer_updated === false) {
                 req.campaign.assigned_to = req.volunteer._id;
                 req.request.assigned = true;
+                await req.request.save();
                 return res.status(200).send();
             } else {
                 return res.status(401).json({ error: "You cannot accept a request you just edited" })
             }
         } else {
             req.request.requirements = requirements;
+            await req.request.save();
             return res.status(200).send();
         }
     } else {
@@ -163,7 +165,7 @@ app.delete("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer,
         await Request.findByIdAndDelete(req.request._id);
         return res.status(200).send()
     } else {
-        return res.status(401).json({ error: "You cannot delete a accepted request" })
+        return res.status(401).json({ error: "You cannot delete an accepted request" })
     }
 })
 
