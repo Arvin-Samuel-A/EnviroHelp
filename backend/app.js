@@ -1,5 +1,9 @@
 require('dotenv').config();
 const express = require('express');
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
+const ObjectId = require("mongoose").Types.ObjectId;
+
 const {
     initDB,
     Admin,
@@ -8,11 +12,15 @@ const {
     Login,
     Request,
     Volunteer
-} = require("./orm")
+} = require("./orm");
 
-const jwt = require("jsonwebtoken");
-const bcrypt = require("bcryptjs");
-const ObjectId = require("mongoose").Types.ObjectId;
+const {
+    authenticate,
+    checkVolunteer,
+    checkCampaignForRequest,
+    checkCampaignForWork,
+    checkCampaigner,
+} = require("./middleware");
 
 const app = express();
 const PORT = process.env.PORT;
@@ -35,86 +43,6 @@ const startServer = async () => {
     }
 }
 
-const authenticate = async (req, res, next) => {
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return res.status(401).json({ message: "Unauthorized: No token provided" });
-    }
-
-    const token = authHeader.split(" ")[1];
-
-    jwt.verify(token, SECRET_KEY, async (err, decoded) => {
-        if (err) {
-            return res.status(403).json({ message: "Forbidden: Invalid token" });
-        }
-
-        const user = await Login.findOne({ username: decoded });
-        if (user == null) {
-            return res.status(404).json({ error: "User not Found" });
-        }
-        req.user = user;
-        next();
-    });
-}
-
-const checkVolunteer = async (req, res, next) => {
-    if (req.user.role !== 'volunteer') {
-        return res.status(400).json({ error: "Invalid role" });
-    }
-
-    const volunteer = await Volunteer.findById(req.user.id);
-    if (volunteer == null) {
-        return res.status(404).json({ error: "User not Found" });
-    }
-
-    req.volunteer = volunteer;
-    next();
-}
-
-const checkCampaignForRequest = async (req, res, next) => {
-    const campaignId = req.params.campaign_id;
-    if (!campaignId) {
-        return res.status(400).json({ error: "Campaign Id is missing" });
-    }
-
-    const request = await Request.findOne({ campaign_id: ObjectId(campaignId), volunteer_id: ObjectId(req.volunteer._id) });
-    if (request == null) {
-        return res.status(404).json({ error: "Request does not exist" });
-    }
-    
-    const campaign = await request.populate("campaign");
-    if (campaign == null) {
-        return res.status(404).json({ error: "Campaign does not exist" })
-    }
-    if (campaign.assigned_to !== null && !campaign.assigned_to.equals(req.volunteer._id)) {
-        return res.status(403).json({ error: "Campaign assigned to another volunteer" });
-    }
-
-    req.campaignId = campaignId;
-    req.request = request;
-    req.campaign = campaign;
-    next();
-}
-
-const checkCampaignForWork = async (req, res, next) => {
-    const campaignId = req.params.campaign_id;
-    if (!campaignId) {
-        return res.status(400).json({ error: "Campaign Id is missing" });
-    }
-
-    const campaign = await Campaign.findById(campaignId);
-    if (campaign == null) {
-        return res.status(404).json({ error: "Campaign does not exist" })
-    }
-    if (!campaign.assigned_to.equals(req.volunteer._id)) {
-        return res.status(403).json({ error: "Campaign assigned to another volunteer" });
-    }
-
-    req.campaignId = campaignId;
-    req.campaign = campaign;
-    next();
-}
 
 app.post("/login", async (req, res) => {
     const { username, password } = req.body;
@@ -181,12 +109,12 @@ app.get("/volunteer/home", authenticate, checkVolunteer, async (req, res) => {
         activeCampaigns.push({ id: campaign._id.toString(), name: campaign.name, completion_percent: campaign.completion_percent, is_flagged: campaign.is_flagged });
     }
 
-    for (let request of await Request.find({ volunteer_id: req.volunteer._id, assigned: false })) {
-        const assignedCampaign = await request.populate("campaign");
-        if(assignedCampaign.assigned_to == null) {
-            newRequests.push({ id: request.campaign_id.toString(), name: (await assignedCampaign.populate("campaigner")).name, campaigner_updated: request.campaigner_updated })
+    for (let request of await Request.find({ volunteer_id: req.volunteer._id, assigned: false }).populate('campaign')) {
+        if(request.campaign.assigned_to == null) {
+            await request.campaign.populate('campaigner');
+            newRequests.push({ id: request.campaign_id.toString(), name: request.campaign.campaigner.name, campaigner_updated: request.campaigner_updated })
         } else {
-            Request.deleteOne({ volunteer_id: req.volunteer._id })
+            Request.findByIdAndDelete(request._id);
         }
     }
 
@@ -203,7 +131,7 @@ app.get("/volunteer/home", authenticate, checkVolunteer, async (req, res) => {
 app.get("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, checkCampaignForRequest, async (req, res) => {
     res.status(200).json({ campaign_id: req.campaignId, name: req.campaign.name, requirements: req.request.requirements, campaigner_updated: req.request.campaigner_updated, contact: req.campaign.contact });
     req.request.campaigner_updated = false;
-    req.request.save();
+    await req.request.save();
 })
 
 app.patch("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, checkCampaignForRequest, async (req, res) => {
@@ -232,7 +160,7 @@ app.patch("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, 
 
 app.delete("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, checkCampaignForRequest, async (req, res) => {
     if (req.request.assigned !== true) {
-        req.request.deleteOne();
+        await Request.findByIdAndDelete(req.request._id);
         return res.status(200).send()
     } else {
         return res.status(401).json({ error: "You cannot delete a accepted request" })
@@ -273,10 +201,12 @@ app.patch("/volunteer/campaign/view/:campaign_id", authenticate, checkVolunteer,
         return res.status(400).json({ error: "Completion percentage should be less than or equal to 100" });
     }
 
-    await Campaign.updateOne({ _id: req.campaign._id }, { $set: { completion_percent: completion_percent } });
+    req.campaign.completion_percent = completion_percent;
+    await req.campaign.save();
     
     if(completion_percent === 100) {
-        await Volunteer.updateOne({ _id: req.volunteer._id }, { $inc: { campaigns_completed: 1 } });
+        req.volunteer.campaigns_completed++;
+        await req.volunteer.save();
     }
 
     return res.status(200).json({ message: "Completion Percentage updated" });
@@ -305,6 +235,32 @@ app.get("/volunteer/find/:search", authenticate, checkVolunteer, async (req, res
     return res.status(200).json({ campaigns: filteredCampaigns });
 })
 
+app.get("/campaigner/home", authenticate, checkCampaigner, async (req, res) => {
+    const activeCampaigns = [];
+    const newRequests = [];
+
+    for (let campaign of await Campaign.find({ campaigner_id: req.campaigner._id, assigned_to: { $ne: null }, completion_percent: { $lt: 100 } })) {
+        activeCampaigns.push({ id: campaign._id.toString(), name: campaign.name, completion_percent: campaign.completion_percent, is_flagged: campaign.is_flagged });
+    }
+
+    for (let request of await Request.find({ assigned: false }).populate('campaign').populate('volunteer')) {
+        if (request.campaign.campaigner_id.equals(req.campaigner._id)) {
+            if (request.campaign.assigned_to == null) {
+                newRequests.push({ id: request.campaign_id, name: request.volunteer.name, volunteer_updated: request.volunteer_updated, volunteer_id: request.volunteer_id.toString() });
+            } else {
+                Request.findByIdAndDelete(request._id);
+            }
+        }
+    }
+
+    return res.status(200).json({
+        name: req.campaigner.name,
+        is_flagged: req.campaigner.is_flagged,
+        profile_pic: req.campaigner.profile_pic,
+        active_campaigns: activeCampaigns,
+        new_requests: newRequests,
+    })
+})
 
 
 

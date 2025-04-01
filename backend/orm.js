@@ -15,7 +15,7 @@ const campaignSchema = new Schema({
   start_date: { type: Date },
   end_date: { type: Date },
   goal: { type: String },
-  assigned_to: { type: mongoose.Schema.Types.ObjectId, ref: 'Volunteer' },
+  assigned_to: { type: mongoose.Schema.Types.ObjectId, ref: 'Volunteer', default: null },
   is_flagged: { type: Boolean, default: false },
   completion_percent: { type: Number, default: 0 },
   contact: { type: String },
