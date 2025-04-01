@@ -282,6 +282,30 @@ app.patch("/volunteer/campaign/view/:campaign_id", authenticate, checkVolunteer,
     return res.status(200).json({ message: "Completion Percentage updated" });
 })
 
-app.get("/volunteer/find/:search", authenticate, checkVolunteer)
+app.get("/volunteer/find/:search", authenticate, checkVolunteer, async (req, res) => {
+    const search = req.params.search;
+    const campaigns = await Campaign.find({ name: { $regex: search, $options: 'i' }, is_flagged: false, assigned_to: null });
+
+    if (campaigns.length === 0) {
+        return res.status(200).json({ campaigns: [] });
+    }
+
+    const campaignIds = campaigns.map(c => c._id);
+    const requests = await Request.find({ 
+        campaign_id: { $in: campaignIds }, 
+        volunteer_id: req.volunteer._id 
+    });
+
+    const requestedCampaigns = new Set(requests.map(req => req.campaign_id.toString()));
+
+    const filteredCampaigns = campaigns
+        .filter(campaign => !requestedCampaigns.has(campaign._id.toString()))
+        .map(campaign => ({ id: campaign._id.toString(), name: campaign.name }));
+
+    return res.status(200).json({ campaigns: filteredCampaigns });
+})
+
+
+
 
 startServer()
