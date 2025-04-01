@@ -48,8 +48,8 @@ const authenticate = async (req, res, next) => {
             return res.status(403).json({ message: "Forbidden: Invalid token" });
         }
 
-        const user = await Login.findOne({ username: decoded }).lean();
-        if (user === null) {
+        const user = await Login.findOne({ username: decoded });
+        if (user == null) {
             return res.status(404).json({ error: "User not Found" });
         }
         req.user = user;
@@ -62,8 +62,8 @@ const checkVolunteer = async (req, res, next) => {
         return res.status(400).json({ error: "Invalid role" });
     }
 
-    const volunteer = await Volunteer.findOne({ _id : req.user.id }).lean();
-    if (volunteer === null) {
+    const volunteer = await Volunteer.findOne({ _id : req.user.id });
+    if (volunteer == null) {
         return res.status(404).json({ error: "User not Found" });
     }
 
@@ -71,18 +71,21 @@ const checkVolunteer = async (req, res, next) => {
     next();
 }
 
-const checkCampaign = async (req, res, next) => {
+const checkCampaignForRequest = async (req, res, next) => {
     const campaignId = req.params.campaign_id;
-    if (campaignId === null) {
+    if (!campaignId) {
         return res.status(400).json({ error: "Campaign Id is missing" });
     }
 
     const request = await Request.findOne({ campaign_id: campaignId, volunteer_id: req.volunteer._id });
-    if (request === null) {
-        return res.status(400).json({ error: "Request does not exist" });
+    if (request == null) {
+        return res.status(404).json({ error: "Request does not exist" });
     }
     
     const campaign = await request.populate("campaign");
+    if (campaign == null) {
+        return res.status(404).json({ error: "Campaign does not exist" })
+    }
     if (campaign.assigned_to !== null && !campaign.assigned_to.equals(req.volunteer._id)) {
         return res.status(403).json({ error: "Campaign assigned to another volunteer" });
     }
@@ -93,14 +96,33 @@ const checkCampaign = async (req, res, next) => {
     next();
 }
 
+const checkCampaignForWork = async (req, res, next) => {
+    const campaignId = req.params.campaign_id;
+    if (!campaignId) {
+        return res.status(400).json({ error: "Campaign Id is missing" });
+    }
+
+    const campaign = await Campaign.findOne({ _id: campaignId });
+    if (campaign == null) {
+        return res.status(404).json({ error: "Campaign does not exist" })
+    }
+    if (!campaign.assigned_to.equals(req.volunteer._id)) {
+        return res.status(403).json({ error: "Campaign assigned to another volunteer" });
+    }
+
+    req.campaignId = campaignId;
+    req.campaign = campaign;
+    next();
+}
+
 app.post("/login", async (req, res) => {
     const { username, password } = req.body;
-    if (username === null || password === null) {
+    if (username == null || password == null) {
         return res.status(400).json({ error: "One or more fields are missing" });
     }
 
     const user = await Login.findOne({ username: username }).lean();
-    if (user === null) {
+    if (user == null) {
         return res.status(404).json({ error: "User not Found" });
     }
 
@@ -114,7 +136,7 @@ app.post("/login", async (req, res) => {
 
 app.post("/create_account", async (req, res) => {
     const { username, password, role } = req.body;
-    if (username === null || password === null) {
+    if (username == null || password == null) {
         return res.status(400).json({ error: "One or more fields are missing" });
     }
 
@@ -125,26 +147,26 @@ app.post("/create_account", async (req, res) => {
 
     if (role === 'campaigner') {
         const { name, contact, image, email } = req.body;
-        if (name === null || contact === null || image === null || email === null) {
+        if (name == null || contact == null || image == null || email == null) {
             return res.status(400).json({ error: "One or more fields are missing" });
         }
 
         const campaigner = await Campaigner.create({ name: name, contact: contact, profile_pic: image, email: email });
-        Login.create({ username: username, hash: await bcrypt.hash(password, 12), id: campaigner._id, role: "campaigner" });
+        await Login.create({ username: username, hash: await bcrypt.hash(password, 12), id: campaigner._id, role: "campaigner" });
 
         const token = jwt.sign({ username }, SECRET_KEY, { expiresIn: "1h" });
-        res.json({ session_id: token, role: "campaigner" });
+        res.status(201).json({ session_id: token, role: "campaigner" });
     } else if (role === 'volunteer') {
         const { name, image, contact, email } = req.body;
-        if (name === null || contact === null || image === null || email === null) {
+        if (name == null || contact == null || image == null || email == null) {
             return res.status(400).json({ error: "One or more fields are missing" });
         }
 
         const volunteer = await Volunteer.create({ name: name, profile_pic: image, contact: contact, email: email });
-        Login.create({ username: username, hash: await bcrypt.hash(password, 12), id: volunteer._id, role: "volunteer" });
+        await Login.create({ username: username, hash: await bcrypt.hash(password, 12), id: volunteer._id, role: "volunteer" });
 
         const token = jwt.sign({ username }, SECRET_KEY, { expiresIn: "1h" });
-        res.json({ session_id: token, role: "volunteer" });
+        res.status(201).json({ session_id: token, role: "volunteer" });
     } else {
         return res.status(400).json({ error: "Invalid role" });
     }
@@ -160,7 +182,7 @@ app.get("/volunteer/home", authenticate, checkVolunteer, async (req, res) => {
 
     for (let request of await Request.find({ volunteer_id: req.volunteer._id, assigned: false })) {
         const assignedCampaign = await request.populate("campaign");
-        if(assignedCampaign.assigned_to === null) {
+        if(assignedCampaign.assigned_to == null) {
             newRequests.push({ id: request.campaign_id.toString(), name: (await assignedCampaign.populate("campaigner")).name, campaigner_updated: request.campaigner_updated })
         } else {
             Request.deleteOne({ volunteer_id: req.volunteer._id })
@@ -177,15 +199,15 @@ app.get("/volunteer/home", authenticate, checkVolunteer, async (req, res) => {
     })
 });
 
-app.get("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, checkCampaign, async (req, res) => {
+app.get("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, checkCampaignForRequest, async (req, res) => {
     res.status(200).json({ campaign_id: req.campaignId, name: req.campaign.name, requirements: req.request.requirements, campaigner_updated: req.request.campaigner_updated, contact: req.campaign.contact });
     req.request.campaigner_updated = false;
     req.request.save();
 })
 
-app.patch("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, checkCampaign, async (req, res) => {
+app.patch("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, checkCampaignForRequest, async (req, res) => {
     const { requirements, assigned } = req.body;
-    if (requirements === null || assigned === null) {
+    if (requirements == null || assigned == null) {
         return res.status(400).json({ error: "One or more fields are missing" });
     }
 
@@ -203,22 +225,22 @@ app.patch("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, 
             return res.status(200).send();
         }
     } else {
-        return res.status(401).json({ error: "You change a accepted request" })
+        return res.status(401).json({ error: "You cannot change a accepted request" })
     }
 })
 
-app.delete("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, checkCampaign, async (req, res) => {
+app.delete("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, checkCampaignForRequest, async (req, res) => {
     if (req.request.assigned !== true) {
         req.request.deleteOne();
         return res.status(200).send()
     } else {
-        return res.status(401).json({ error: "You delete a accepted request" })
+        return res.status(401).json({ error: "You cannot delete a accepted request" })
     }
 })
 
 app.post("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, async (req, res) => {
     const campaignId = req.params.campaign_id;
-    if (campaignId === null) {
+    if (!campaignId) {
         return res.status(400).json({ error: "Campaign Id is missing" });
     }
 
@@ -228,8 +250,35 @@ app.post("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, a
     }
 
     const { requirements } = req.body;
-    Request.create({ campaign_id: campaignId, volunteer_id: req.volunteer._id, })
+    await Request.create({ campaign_id: campaignId, volunteer_id: req.volunteer._id, requirements: requirements, volunteer_updated: true})
+    return res.status(201).json({ message: "Request created" });
+})
 
+app.get("/volunteer/campaign/view/:campaign_id", authenticate, checkVolunteer, checkCampaignForWork, async (req, res) => {
+    return res.status(200).json(req.campaign.toJSON());
+})
+
+app.patch("/volunteer/campaign/view/:campaign_id", authenticate, checkVolunteer, checkCampaignForWork, async (req, res) => {
+    const { completion_percent } = req.body;
+    if (completion_percent == null) {
+        return res.status(400).json({ error: "Completion percentage is missing" });
+    }
+
+    if(req.campaign.completion_percent > completion_percent) {
+        return res.status(400).json({ error: "Completion percentage cannot be decreased" });
+    }
+
+    if(completion_percent > 100) {
+        return res.status(400).json({ error: "Completion percentage should be less than or equal to 100" });
+    }
+
+    await Campaign.updateOne({ _id: req.campaign._id }, { $set: { completion_percent: completion_percent } });
+    
+    if(completion_percent === 100) {
+        await Volunteer.updateOne({ _id: req.volunteer._id }, { $inc: { campaigns_completed: 1 } });
+    }
+
+    return res.status(200).json({ message: "Completion Percentage updated" });
 })
 
 startServer()
