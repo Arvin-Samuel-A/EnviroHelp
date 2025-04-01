@@ -12,6 +12,7 @@ const {
 
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const ObjectId = require("mongoose").Types.ObjectId;
 
 const app = express();
 const PORT = process.env.PORT;
@@ -62,7 +63,7 @@ const checkVolunteer = async (req, res, next) => {
         return res.status(400).json({ error: "Invalid role" });
     }
 
-    const volunteer = await Volunteer.findOne({ _id : req.user.id });
+    const volunteer = await Volunteer.findById(req.user.id);
     if (volunteer == null) {
         return res.status(404).json({ error: "User not Found" });
     }
@@ -77,7 +78,7 @@ const checkCampaignForRequest = async (req, res, next) => {
         return res.status(400).json({ error: "Campaign Id is missing" });
     }
 
-    const request = await Request.findOne({ campaign_id: campaignId, volunteer_id: req.volunteer._id });
+    const request = await Request.findOne({ campaign_id: ObjectId(campaignId), volunteer_id: ObjectId(req.volunteer._id) });
     if (request == null) {
         return res.status(404).json({ error: "Request does not exist" });
     }
@@ -102,7 +103,7 @@ const checkCampaignForWork = async (req, res, next) => {
         return res.status(400).json({ error: "Campaign Id is missing" });
     }
 
-    const campaign = await Campaign.findOne({ _id: campaignId });
+    const campaign = await Campaign.findById(campaignId);
     if (campaign == null) {
         return res.status(404).json({ error: "Campaign does not exist" })
     }
@@ -244,13 +245,13 @@ app.post("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, a
         return res.status(400).json({ error: "Campaign Id is missing" });
     }
 
-    const request = await Request.findOne({ campaign_id: campaignId, volunteer_id: req.volunteer._id });
+    const request = await Request.findOne({ campaign_id: ObjectId(campaignId), volunteer_id: req.volunteer._id });
     if (request !== null) {
         return res.status(400).json({ error: "Request already exists" });
     }
 
     const { requirements } = req.body;
-    await Request.create({ campaign_id: campaignId, volunteer_id: req.volunteer._id, requirements: requirements, volunteer_updated: true})
+    await Request.create({ campaign_id: ObjectId(campaignId), volunteer_id: req.volunteer._id, requirements: requirements, volunteer_updated: true})
     return res.status(201).json({ message: "Request created" });
 })
 
@@ -280,5 +281,7 @@ app.patch("/volunteer/campaign/view/:campaign_id", authenticate, checkVolunteer,
 
     return res.status(200).json({ message: "Completion Percentage updated" });
 })
+
+app.get("/volunteer/find/:search", authenticate, checkVolunteer)
 
 startServer()
