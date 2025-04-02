@@ -1,32 +1,37 @@
-require('dotenv').config();
-const express = require('express');
-const jwt = require("jsonwebtoken");
-const bcrypt = require("bcryptjs");
-const ObjectId = require("mongoose").Types.ObjectId;
+import dotenv from "dotenv";
+import express from "express";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+import cors from "cors";
+import { Types } from "mongoose";
 
-const {
+import {
     initDB,
-    Admin,
+    // Admin,
     Campaign,
     Campaigner,
     Login,
     Request,
     Volunteer
-} = require("./orm");
+} from "./orm.js";
 
-const {
+import {
     authenticate,
     checkVolunteer,
     checkCampaignForRequest,
     checkCampaignForWork,
-    checkCampaigner,
-} = require("./middleware");
+    checkCampaigner
+} from "./middleware.js";
 
+const ObjectId = Types.ObjectId;
+
+dotenv.config();
 const app = express();
 const PORT = process.env.PORT;
 const SECRET_KEY = process.env.SECRET_KEY;
 
 app.use(express.json());
+app.use(cors());
 
 const startServer = async () => {
     try {
@@ -175,13 +180,13 @@ app.post("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, a
         return res.status(400).json({ error: "Campaign Id is missing" });
     }
 
-    const request = await Request.findOne({ campaign_id: ObjectId(campaignId), volunteer_id: req.volunteer._id });
+    const request = await Request.findOne({ campaign_id: new ObjectId(campaignId), volunteer_id: req.volunteer._id });
     if (request !== null) {
         return res.status(400).json({ error: "Request already exists" });
     }
 
     const { requirements } = req.body;
-    await Request.create({ campaign_id: ObjectId(campaignId), volunteer_id: req.volunteer._id, requirements: requirements, volunteer_updated: true})
+    await Request.create({ campaign_id: new ObjectId(campaignId), volunteer_id: req.volunteer._id, requirements: requirements, volunteer_updated: true})
     return res.status(201).json({ message: "Request created" });
 })
 
@@ -264,6 +269,21 @@ app.get("/campaigner/home", authenticate, checkCampaigner, async (req, res) => {
     })
 })
 
+app.get("campaigner/campaign", authenticate, checkCampaigner, async (req, res) => {
+    const assignedCampaigns = [];
+    const unassignedCampaigns = [];
 
+    for (let campaign of Campaign.find({ campaigner_id: req.campaign._id })) {
+        if (campaign.assigned_to == null) {
+            assignedCampaigns.push({ id: campaign._id.toString(), name: campaign.name, completion_percent: campaign.completion_percent, is_flagged: campaign.completion_percent });
+        } else {
+            unassignedCampaigns.push({ id: campaign._id.toString(), name: campaign.name, completion_percent: campaign.completion_percent, is_flagged: campaign.completion_percent });
+        }
+    }
+
+    return res.status(200).json({ assigned_campaigns: assignedCampaigns, unassigned_campaigns: unassignedCampaigns });
+})
+
+app.get("campaigner/campaign/view/:campaign_id", authenticate, checkCampaigner)
 
 startServer()

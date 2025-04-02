@@ -1,16 +1,20 @@
-const {
-    initDB,
-    Admin,
+import dotenv from "dotenv";
+import jwt from "jsonwebtoken";
+import { Types } from "mongoose";
+
+import {
+    // Admin,
     Campaign,
     Campaigner,
     Login,
     Request,
     Volunteer
-} = require("./orm")
+} from "./orm.js";
 
-const jwt = require("jsonwebtoken");
-const bcrypt = require("bcryptjs");
-const ObjectId = require("mongoose").Types.ObjectId;
+const ObjectId = Types.ObjectId;
+
+dotenv.config();
+const SECRET_KEY = process.env.SECRET_KEY;
 
 const authenticate = async (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -26,7 +30,7 @@ const authenticate = async (req, res, next) => {
             return res.status(403).json({ message: "Forbidden: Invalid token" });
         }
 
-        const user = await Login.findOne({ username: decoded });
+        const user = await Login.findOne({ username: decoded.username });
         if (user == null) {
             return res.status(404).json({ error: "User not Found" });
         }
@@ -55,7 +59,7 @@ const checkCampaignForRequest = async (req, res, next) => {
         return res.status(400).json({ error: "Campaign Id is missing" });
     }
 
-    const request = await Request.findOne({ campaign_id: ObjectId(campaignId), volunteer_id: ObjectId(req.volunteer._id) });
+    const request = await Request.findOne({ campaign_id: new ObjectId(campaignId), volunteer_id: new ObjectId(req.volunteer._id) });
     if (request == null) {
         return res.status(404).json({ error: "Request does not exist" });
     }
@@ -107,7 +111,7 @@ const checkCampaigner = async (req, res, next) => {
     next();
 }
 
-export default {
+export {
     authenticate,
     checkVolunteer,
     checkCampaignForRequest,
