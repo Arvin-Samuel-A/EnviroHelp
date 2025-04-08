@@ -21,7 +21,8 @@ import {
     checkCampaignForRequest,
     checkCampaignForWork,
     checkCampaigner,
-    checkCampaignExists
+    checkCampaignExists,
+    checkForRequest
 } from "./middleware.js";
 
 const ObjectId = Types.ObjectId;
@@ -152,14 +153,15 @@ app.patch("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, 
                 req.campaign.assigned_to = req.volunteer._id;
                 req.request.assigned = true;
                 await req.request.save();
-                return res.status(200).send();
+                await req.campaign.save();
+                return res.status(200).json({ message: "Request accepted" });
             } else {
                 return res.status(401).json({ error: "You cannot accept a request you just edited" })
             }
         } else {
             req.request.requirements = requirements;
             await req.request.save();
-            return res.status(200).send();
+            return res.status(200).json({ message: "Request updated" });
         }
     } else {
         return res.status(401).json({ error: "You cannot change a accepted request" })
@@ -169,7 +171,7 @@ app.patch("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, 
 app.delete("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, checkCampaignForRequest, async (req, res) => {
     if (req.request.assigned !== true) {
         await Request.findByIdAndDelete(req.request._id);
-        return res.status(200).send()
+        return res.status(200).json({ message: "Request deleted" });
     } else {
         return res.status(401).json({ error: "You cannot delete an accepted request" })
     }
@@ -375,6 +377,65 @@ app.get("/campaigner/volunteer/view/:volunteer_id", authenticate, checkCampaigne
     }
 
     return res.status(200).json({ name: volunteer.name, campaigns_completed: volunteer.campaigns_completed, profile_pic: volunteer.profile_pic, contact: volunteer.contact });
+})
+
+app.get("/campaigner/request/view/:campaign_id/:volunteer_id", authenticate, checkCampaigner, checkForRequest, async (req, res) => {
+    res.status(200).json({ name: req.request.volunteer.name, requirements: req.request.requirements, contact: req.request.campaign.contact, volunteer_updated: req.request.volunteer_updated });
+    req.request.campaigner_updated = false;
+    await req.request.save();
+})
+
+app.patch("/campaigner/request/view/:campaign_id/:volunteer_id", authenticate, checkCampaigner, checkForRequest, async (req, res) => {
+    const { requirements, assigned } = req.body;
+    if (assigned == null || requirements == null) {
+        return res.status(400).json({ error: "One or more fields are missing" });
+    }
+
+    if (req.request.assigned === false) {
+        if (assigned === true) {
+            if (req.request.campaigner_updated === false) {
+                req.campaign.assigned_to = req.request.volunteer_id;
+                req.request.assigned = true;
+                await req.request.save();
+                await req.campaign.save();
+                return res.status(200).json({ message: "Request accepted" });
+            } else {
+                return res.status(401).json({ error: "You cannot accept a request you just edited" })
+            }
+        } else {
+            req.request.requirements = requirements;
+            await req.request.save();
+            return res.status(200).json({ message: "Request updated" });
+        }
+    } else {
+        return res.status(401).json({ error: "You cannot change a accepted request" })
+    }
+})
+
+app.delete("/campaigner/request/view/:campaign_id/:volunteer_id", authenticate, checkCampaigner, checkForRequest, async (req, res) => {
+    if (req.request.assigned !== true) {
+        await Request.findByIdAndDelete(req.request._id);
+        return res.status(200).json({ message: "Request deleted" });
+    } else {
+        return res.status(401).json({ error: "You cannot delete an accepted request" })
+    }
+})
+
+app.post("/campaigner/request/view/:campaign_id/:volunteer_id", authenticate, checkCampaigner, async (req, res) => {
+    const campaignId = req.params.campaign_id;
+    const volunteerId = req.params.volunteer_id;
+    if (!campaignId || !volunteerId) {
+        return res.status(400).json({ error: "Campaign Id or Volunteer Id is missing" });
+    }
+
+    const request = await Request.findOne({ campaign_id: new ObjectId(campaignId), volunteer_id: new ObjectId(volunteerId) });
+    if (request !== null) {
+        return res.status(400).json({ error: "Request already exists" });
+    }
+
+    const { requirements } = req.body;
+    await Request.create({ campaign_id: new ObjectId(campaignId), volunteer_id: new ObjectId(volunteerId), requirements: requirements, volunteer_updated: false, assigned: false })
+    return res.status(201).json({ message: "Request created" });
 })
 
 startServer();

@@ -131,11 +131,31 @@ const checkCampaignExists = async (req, res, next) => {
     next();
 }
 
+const checkForRequest = async (req, res, next) => {
+    const campaignId = req.params.campaign_id;
+    const volunteerId = req.params.volunteer_id;
+    if (!campaignId || !volunteerId) {
+        return res.status(400).json({ error: "Campaign Id or Volunteer Id is missing" });
+    }
+
+    const request = await Request.findOne({ campaign_id: new ObjectId(campaignId), volunteer_id: new ObjectId(volunteerId) }).populate('campaign').populate('volunteer');
+    if (request == null) {
+        return res.status(404).json({ error: "Request not found" });
+    }
+
+    req.campaignId = campaignId;
+    req.volunteerId = volunteerId;
+    req.request = request;
+    next();
+}
+
+
 export {
     authenticate,
     checkVolunteer,
     checkCampaignForRequest,
     checkCampaignForWork,
     checkCampaigner,
-    checkCampaignExists
+    checkCampaignExists,
+    checkForRequest
 }
