@@ -86,7 +86,7 @@ const checkCampaignForWork = async (req, res, next) => {
 
     const campaign = await Campaign.findById(campaignId);
     if (campaign == null) {
-        return res.status(404).json({ error: "Campaign does not exist" })
+        return res.status(404).json({ error: "Campaign does not exist" });
     }
     if (!campaign.assigned_to.equals(req.volunteer._id)) {
         return res.status(403).json({ error: "Campaign assigned to another volunteer" });
@@ -111,10 +111,31 @@ const checkCampaigner = async (req, res, next) => {
     next();
 }
 
+const checkCampaignExists = async (req, res, next) => {
+    const campaignId = req.params.campaign_id;
+    if (!campaignId) {
+        return res.status(400).json({ error: "Campaign Id is missing" });
+    }
+
+    const campaign = await Campaign.findById(campaignId);
+    if (campaign == null) {
+        return res.status(404).json({ error: "Campaign does not exist" });
+    }
+
+    if (!campaign.campaigner_id.equals(req.campaigner._id)) {
+        return res.status(403).json({ error: "Campaign does not belong to the campaigner" });
+    }
+
+    req.campaignId = campaignId;
+    req.campaign = campaign;
+    next();
+}
+
 export {
     authenticate,
     checkVolunteer,
     checkCampaignForRequest,
     checkCampaignForWork,
     checkCampaigner,
+    checkCampaignExists
 }
