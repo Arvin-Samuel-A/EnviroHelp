@@ -143,12 +143,12 @@ app.get("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, ch
 
 app.patch("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, checkCampaignForRequest, async (req, res) => {
     const { requirements, assigned } = req.body;
-    if (requirements == null || assigned == null) {
+    if (requirements == null) {
         return res.status(400).json({ error: "One or more fields are missing" });
     }
 
     if (req.request.assigned === false) {
-        if (assigned === true) {
+        if (assigned === "true") {
             if (req.request.volunteer_updated === false) {
                 req.campaign.assigned_to = req.volunteer._id;
                 req.request.assigned = true;
@@ -160,6 +160,7 @@ app.patch("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, 
             }
         } else {
             req.request.requirements = requirements;
+            req.request.volunteer_updated = true;
             await req.request.save();
             return res.status(200).json({ message: "Request updated" });
         }
@@ -276,7 +277,7 @@ app.get("/campaigner/campaign", authenticate, checkCampaigner, async (req, res) 
     const assignedCampaigns = [];
     const unassignedCampaigns = [];
 
-    for (let campaign of await Campaign.find({ campaigner_id: req.campaign._id })) {
+    for (let campaign of await Campaign.find({ campaigner_id: req.campaigner._id })) {
         if (campaign.assigned_to != null) {
             assignedCampaigns.push({ id: campaign._id.toString(), name: campaign.name, completion_percent: campaign.completion_percent, is_flagged: campaign.is_flagged });
         } else {
@@ -327,18 +328,16 @@ app.patch("/campaigner/campaign/view/:campaign_id", authenticate, checkCampaigne
     return res.status(200).json({ message: "Campaign is updated" })
 })
 
-
-app.post("/campaigner/campaign/view/:campaign_id", authenticate, checkCampaigner, async (req, res) => {
-    const campaignId = req.params.campaign_id;
-    if (!campaignId) {
-        return res.status(400).json({ error: "Campaign Id is missing" });
+app.delete("/campaigner/campaign/view/:campaign_id", authenticate, checkCampaigner, checkCampaignExists, async (req, res) => {
+    if (req.campaign.assigned_to !== null) {
+        return res.status(401).json({ error: "You cannot delete an assigned campaign" })
     }
 
-    const campaign = await Campaign.findById(campaignId);
-    if (campaign != null) {
-        return res.status(404).json({ error: "Campaign already exists" });
-    }
+    await Campaign.findByIdAndDelete(req.campaign._id);
+    return res.status(200).json({ message: "Campaign deleted" });
+})
 
+app.post("/campaigner/campaign/view", authenticate, checkCampaigner, async (req, res) => {
     const {
         name,
         description,
@@ -352,7 +351,7 @@ app.post("/campaigner/campaign/view/:campaign_id", authenticate, checkCampaigner
         return res.status(400).json({ error: "One or more fields are missing" });
     }
 
-    await Campaign.create({ name: name, description: description, start_date: start_date, end_date: end_date, goal: goal, contact: contact });
+    await Campaign.create({ campaigner_id: req.campaigner._id, name: name, description: description, start_date: start_date, end_date: end_date, goal: goal, contact: contact, created_date: (new Date()).toISOString() });
     return res.status(200).json({ message: "Campaign was created successfully" });
 })
 
@@ -387,12 +386,12 @@ app.get("/campaigner/request/view/:campaign_id/:volunteer_id", authenticate, che
 
 app.patch("/campaigner/request/view/:campaign_id/:volunteer_id", authenticate, checkCampaigner, checkForRequest, async (req, res) => {
     const { requirements, assigned } = req.body;
-    if (assigned == null || requirements == null) {
+    if (requirements == null) {
         return res.status(400).json({ error: "One or more fields are missing" });
     }
 
     if (req.request.assigned === false) {
-        if (assigned === true) {
+        if (assigned === "true") {
             if (req.request.campaigner_updated === false) {
                 req.campaign.assigned_to = req.request.volunteer_id;
                 req.request.assigned = true;
@@ -404,6 +403,7 @@ app.patch("/campaigner/request/view/:campaign_id/:volunteer_id", authenticate, c
             }
         } else {
             req.request.requirements = requirements;
+            req.request.campaigner_updated = true;
             await req.request.save();
             return res.status(200).json({ message: "Request updated" });
         }
@@ -434,7 +434,7 @@ app.post("/campaigner/request/view/:campaign_id/:volunteer_id", authenticate, ch
     }
 
     const { requirements } = req.body;
-    await Request.create({ campaign_id: new ObjectId(campaignId), volunteer_id: new ObjectId(volunteerId), requirements: requirements, volunteer_updated: false, assigned: false })
+    await Request.create({ campaign_id: new ObjectId(campaignId), volunteer_id: new ObjectId(volunteerId), requirements: requirements, campaigner_updated: true, assigned: false })
     return res.status(201).json({ message: "Request created" });
 })
 
