@@ -119,7 +119,7 @@ app.get("/volunteer/home", authenticate, checkVolunteer, async (req, res) => {
     for (let request of await Request.find({ volunteer_id: req.volunteer._id, assigned: false }).populate('campaign')) {
         if (request.campaign.assigned_to == null) {
             await request.campaign.populate('campaigner');
-            newRequests.push({ id: request.campaign_id.toString(), name: request.campaign.campaigner.name, campaigner_updated: request.campaigner_updated })
+            newRequests.push({ id: request.campaign_id.toString(), name: request.campaign.campaigner.name, campaigner_updated: request.campaigner_updated, requirements: request.requirements });
         } else {
             Request.findByIdAndDelete(request._id);
         }
@@ -189,6 +189,14 @@ app.post("/volunteer/request/view/:campaign_id", authenticate, checkVolunteer, a
         return res.status(400).json({ error: "Request already exists" });
     }
 
+    const campaign = await Campaign.findById(campaignId);
+    if (campaign == null) {
+        return res.status(404).json({ error: "Campaign does not exist" });
+    } 
+    if (campaign.assigned_to !== null) {
+        return res.status(403).json({ error: "Campaign assigned to another volunteer" });
+    }
+
     const { requirements } = req.body;
     await Request.create({ campaign_id: new ObjectId(campaignId), volunteer_id: req.volunteer._id, requirements: requirements, volunteer_updated: true })
     return res.status(201).json({ message: "Request created" });
@@ -215,7 +223,7 @@ app.patch("/volunteer/campaign/view/:campaign_id", authenticate, checkVolunteer,
     req.campaign.completion_percent = completion_percent;
     await req.campaign.save();
 
-    if (completion_percent === 100) {
+    if (completion_percent == 100) {
         req.volunteer.campaigns_completed++;
         await req.volunteer.save();
     }
@@ -248,10 +256,15 @@ app.get("/volunteer/find/:search", authenticate, checkVolunteer, async (req, res
 
 app.get("/campaigner/home", authenticate, checkCampaigner, async (req, res) => {
     const activeCampaigns = [];
+    const unassignedCampaigns = [];
     const newRequests = [];
 
-    for (let campaign of await Campaign.find({ campaigner_id: req.campaigner._id, assigned_to: { $ne: null }, completion_percent: { $lt: 100 } })) {
-        activeCampaigns.push({ id: campaign._id.toString(), name: campaign.name, completion_percent: campaign.completion_percent, is_flagged: campaign.is_flagged });
+    for (let campaign of await Campaign.find({ campaigner_id: req.campaigner._id })) {
+        if (campaign.assigned_to == null) {
+            unassignedCampaigns.push({ id: campaign._id.toString(), name: campaign.name, completion_percent: campaign.completion_percent, is_flagged: campaign.is_flagged });
+        } else {
+            activeCampaigns.push({ id: campaign._id.toString(), name: campaign.name, completion_percent: campaign.completion_percent, is_flagged: campaign.is_flagged });
+        }
     }
 
     for (let request of await Request.find({ assigned: false }).populate('campaign').populate('volunteer')) {
@@ -269,6 +282,7 @@ app.get("/campaigner/home", authenticate, checkCampaigner, async (req, res) => {
         is_flagged: req.campaigner.is_flagged,
         profile_pic: req.campaigner.profile_pic,
         active_campaigns: activeCampaigns,
+        unassigned_campaigns: unassignedCampaigns,
         new_requests: newRequests,
     })
 })
@@ -431,6 +445,14 @@ app.post("/campaigner/request/view/:campaign_id/:volunteer_id", authenticate, ch
     const request = await Request.findOne({ campaign_id: new ObjectId(campaignId), volunteer_id: new ObjectId(volunteerId) });
     if (request !== null) {
         return res.status(400).json({ error: "Request already exists" });
+    }
+
+    const campaign = await Campaign.findById(campaignId);
+    if (campaign == null) {
+        return res.status(404).json({ error: "Campaign does not exist" });
+    } 
+    if (campaign.assigned_to !== null) {
+        return res.status(403).json({ error: "Campaign already assigned" });
     }
 
     const { requirements } = req.body;
