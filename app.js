@@ -38,7 +38,7 @@ app.use(cors());
 const startServer = async () => {
     try {
         await initDB();
-        app.listen(PORT, (err) => {
+        app.listen(PORT, '0.0.0.0', (err) => {
             if (!err) {
                 console.log("Server started");
             } else {
@@ -50,6 +50,10 @@ const startServer = async () => {
     }
 }
 
+app.get('/', (req, res) => {
+    res.send('Hello from EnviroHelp 🚀');
+  });
+  
 
 app.post("/login", async (req, res) => {
     const { username, password } = req.body;
